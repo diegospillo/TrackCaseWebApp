@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#0F172A" />
+  <title>TrackCase</title>
+  <link rel="stylesheet" href="css/style.css?v=2.0.1" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- ============ LOGIN / SELEZIONE PROFILO ============ -->
+    <section id="loginView" class="view hidden">
+      <div class="login-hero">
+        <div class="login-logo"><span class="ic" data-icon="cigarette" data-size="56"></span></div>
+        <h1 class="login-title">TrackCase</h1>
+        <p class="login-subtitle">Il tuo diario TEREA, preciso al secondo.</p>
+      </div>
+
+      <div id="profileList" class="profile-list"></div>
+
+      <button id="btnNewProfile" class="btn-primary">Crea nuovo profilo</button>
+
+      <!-- Form creazione profilo -->
+      <div id="newProfileForm" class="glass-card hidden" style="margin-top:16px;">
+        <h3 style="margin-top:0;">Benvenuto!</h3>
+        <label class="field-label">Come ti chiami?</label>
+        <input id="inputName" class="field-input" type="text" placeholder="Es: Diego" maxlength="24" />
+        <label class="field-label">Budget giornaliero (TEREA)</label>
+        <input id="inputBudget" class="field-input" type="number" value="20" min="1" max="100" />
+        <label class="field-label">Quale IQOS utilizzi?</label>
+        <select id="inputModel" class="field-input">
+          <option value="IlumaPrime">ILUMA Prime</option>
+          <option value="IlumaMid">ILUMA Standard</option>
+          <option value="IlumaOne">ILUMA One</option>
+          <option value="IlumaDiego">ILUMA Prime Breeze Blue</option>
+        </select>
+        <button id="btnCreateProfile" class="btn-primary" style="margin-top:16px;">Inizia</button>
+      </div>
+
+      <p class="login-hint">Per usare TrackCase apri questa pagina in <strong>Bluefy</strong> (iOS) o <strong>Chrome</strong> (Android/desktop) e collega il tuo ESP32.</p>
+    </section>
+
+    <!-- ============ APP PRINCIPALE ============ -->
+    <section id="mainView" class="view hidden">
+
+      <!-- ---- HOME ---- -->
+      <div id="tab-home" class="tab-page">
+        <header class="app-header">
+          <div>
+            <h1 id="greeting" class="greeting">Ciao</h1>
+            <div class="conn-row">
+              <span id="connDot" class="conn-dot"></span>
+              <span id="connText" class="conn-text">Disconnesso</span>
+            </div>
+          </div>
+          <div id="homeRingMini" class="ring-mini"></div>
+        </header>
+
+        <!-- Selettore dispositivo (visibile solo con >1 dispositivo) -->
+        <div id="deviceSelector" class="device-selector hidden"></div>
+
+        <div class="hero-ring-wrap">
+          <div class="radial-glow"></div>
+          <div id="homeRing" class="ring-big"></div>
+        </div>
+
+        <div id="hardwarePills" class="pills-row">
+          <div class="glass-pill"><span id="pillBatteryIcon" class="ic" data-icon="battery" data-size="18"></span><span id="pillBattery">--%</span></div>
+          <div class="glass-pill"><span class="ic" data-icon="bolt" data-size="18"></span><span id="pillVoltage">-- V</span></div>
+          <div class="glass-pill"><span class="ic" data-icon="clock" data-size="18"></span><span id="pillTime">--:--</span></div>
+        </div>
+
+        <div class="sync-area">
+          <button id="btnSync" class="btn-sync">Collega TrackCase</button>
+          <p id="syncHint" class="sync-hint"></p>
+        </div>
+      </div>
+
+      <!-- ---- STATISTICHE ---- -->
+      <div id="tab-stats" class="tab-page hidden">
+        <header class="page-header">
+          <h1>Statistiche</h1>
+          <p class="page-subtitle">Panoramica ultimi 7 giorni</p>
+        </header>
+        <div class="stats-highlights">
+          <div class="glass-card highlight-card">
+            <div class="highlight-title"><span class="ic" data-icon="chart" data-size="15"></span> Media 7 Giorni</div>
+            <div id="statWeeklyAvg" class="highlight-value">0.0</div>
+          </div>
+          <div class="glass-card highlight-card">
+            <div class="highlight-title"><span class="ic" data-icon="flame" data-size="15"></span> Miglior Serie</div>
+            <div id="statBestStreak" class="highlight-value">0 gg</div>
+          </div>
+        </div>
+        <div class="glass-card chart-card">
+          <div class="chart-header">
+            <span>Consumo Settimanale</span>
+            <span id="chartBudgetLabel" class="budget-label">Budget: 20</span>
+          </div>
+          <canvas id="weeklyChart" height="180"></canvas>
+        </div>
+        <h2 class="section-title">Impatto Reale</h2>
+        <div id="odometerCard" class="glass-card odometer-card hidden">
+          <div>
+            <div class="highlight-title"><span class="ic" data-icon="cloud" data-size="15"></span> Sessioni Totali</div>
+            <div class="odometer-sub">Vita del dispositivo</div>
+          </div>
+          <div id="statLifetime" class="odometer-value">0</div>
+        </div>
+        <div class="impact-row">
+          <div class="glass-card impact-card">
+            <div class="impact-icon"><span class="ic" data-icon="euro" data-size="28"></span></div>
+            <div class="impact-title">Spesa Stimata</div>
+            <div class="impact-sub">Totale dispositivo</div>
+            <div id="statMoney" class="impact-value">0.00 €</div>
+          </div>
+          <div class="glass-card impact-card">
+            <div class="impact-icon"><span class="ic" data-icon="clock" data-size="28"></span></div>
+            <div class="impact-title">Tempo Impiegato</div>
+            <div class="impact-sub">Totale dispositivo</div>
+            <div id="statTime" class="impact-value">0m</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ---- DIARIO ---- -->
+      <div id="tab-diary" class="tab-page hidden">
+        <header class="page-header row-between">
+          <div>
+            <h1>Diario Sessioni</h1>
+            <p id="diaryDateLabel" class="page-subtitle">Oggi</p>
+          </div>
+          <div class="diary-nav">
+            <button id="diaryPrev" class="icon-btn"><span class="ic" data-icon="chevron-left" data-size="20"></span></button>
+            <button id="diaryNext" class="icon-btn"><span class="ic" data-icon="chevron-right" data-size="20"></span></button>
+          </div>
+        </header>
+        <div id="weekStrip" class="week-strip"></div>
+        <div class="glass-card diary-ring-card">
+          <div id="diaryRing" class="ring-big"></div>
+        </div>
+        <div class="glass-card chart-card">
+          <div class="chart-header"><span>Timeline del giorno</span></div>
+          <canvas id="timelineChart" height="120"></canvas>
+        </div>
+        <div id="sessionList" class="session-list"></div>
+      </div>
+
+      <!-- ---- IMPOSTAZIONI ---- -->
+      <div id="tab-settings" class="tab-page hidden">
+        <header class="page-header">
+          <h1>Impostazioni</h1>
+        </header>
+
+        <p class="section-label">PREFERENZE</p>
+        <div class="glass-card settings-card">
+          <div class="settings-row">
+            <span class="settings-icon ic" data-icon="target" data-size="22"></span>
+            <span class="settings-title">Obiettivo Giornaliero</span>
+            <span class="stepper">
+              <button id="budgetMinus" class="icon-btn">−</button>
+              <span id="budgetValue" class="stepper-value">20</span>
+              <button id="budgetPlus" class="icon-btn accent">+</button>
+            </span>
+          </div>
+          <div class="divider"></div>
+          <div class="settings-row">
+            <span class="settings-icon ic" data-icon="clock" data-size="22"></span>
+            <span class="settings-title">Intervallo Poll ESP32</span>
+            <select id="pollSelect" class="field-input small">
+              <option value="30">30 s</option>
+              <option value="60">60 s</option>
+              <option value="300">5 min</option>
+              <option value="600" selected>10 min</option>
+              <option value="900">15 min</option>
+              <option value="1800">30 min</option>
+            </select>
+          </div>
+        </div>
+
+        <p class="section-label">PROFILO</p>
+        <div class="glass-card settings-card">
+          <div class="settings-row clickable" id="rowEditName">
+            <span class="settings-icon ic" data-icon="person" data-size="22"></span>
+            <span class="settings-title">Nome Utente<br /><small id="settingsUserName" class="settings-sub"></small></span>
+            <span class="chevron">›</span>
+          </div>
+          <div class="divider"></div>
+          <div class="settings-row clickable" id="rowEditModel">
+            <span class="settings-icon ic" data-icon="cigarette" data-size="22"></span>
+            <span class="settings-title">Modello IQOS<br /><small id="settingsModel" class="settings-sub"></small></span>
+            <span class="chevron">›</span>
+          </div>
+        </div>
+
+        <p class="section-label">I MIEI DISPOSITIVI</p>
+        <div id="deviceList" class="device-list"></div>
+        <button id="btnAddDevice" class="btn-secondary">+ Aggiungi TrackCase</button>
+
+        <p class="section-label">GESTIONE DISPOSITIVO</p>
+        <div class="glass-card settings-card">
+          <div class="settings-row clickable" id="rowPairIqos">
+            <span class="settings-icon ic" data-icon="link" data-size="22"></span>
+            <span class="settings-title">Associa nuovo IQOS<br /><small id="settingsIqosMac" class="settings-sub"></small></span>
+            <span class="chevron">›</span>
+          </div>
+          <div class="divider"></div>
+          <div class="settings-row clickable destructive" id="rowUnpairIqos">
+            <span class="settings-icon ic" data-icon="link-off" data-size="22"></span>
+            <span class="settings-title">Dissocia IQOS</span>
+            <span class="chevron">›</span>
+          </div>
+          <div class="divider"></div>
+          <div class="settings-row clickable destructive" id="rowClearEvents">
+            <span class="settings-icon ic" data-icon="trash" data-size="22"></span>
+            <span class="settings-title">Cancella storico ESP32</span>
+            <span class="chevron">›</span>
+          </div>
+        </div>
+
+        <p class="section-label">ACCOUNT</p>
+        <div class="glass-card settings-card">
+          <div class="settings-row clickable" id="rowSwitchUser">
+            <span class="settings-icon ic" data-icon="refresh" data-size="22"></span>
+            <span class="settings-title">Cambia utente</span>
+            <span class="chevron">›</span>
+          </div>
+          <div class="divider"></div>
+          <div class="settings-row clickable destructive" id="rowClearLocal">
+            <span class="settings-icon ic" data-icon="trash" data-size="22"></span>
+            <span class="settings-title">Cancella storico WebApp<br /><small class="settings-sub">Svuota le sessioni salvate in questo browser</small></span>
+            <span class="chevron">›</span>
+          </div>
+        </div>
+
+        <p class="version-label">TrackCase WebApp v2.0.1 — firmware ≥ 2.0</p>
+      </div>
+
+      <!-- ---- NAVBAR ---- -->
+      <nav class="glass-nav">
+        <button class="nav-btn active" data-tab="tab-home"><span class="ic" data-icon="home" data-size="20"></span>Home</button>
+        <button class="nav-btn" data-tab="tab-stats"><span class="ic" data-icon="chart" data-size="20"></span>Statistiche</button>
+        <button class="nav-btn" data-tab="tab-diary"><span class="ic" data-icon="calendar" data-size="20"></span>Diario</button>
+        <button class="nav-btn" data-tab="tab-settings"><span class="ic" data-icon="settings" data-size="20"></span>Impostazioni</button>
+      </nav>
+    </section>
+
+    <!-- Toast -->
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script src="js/icons.js?v=2.0.1"></script>
+  <script src="js/store.js?v=2.0.1"></script>
+  <script src="js/charts.js?v=2.0.1"></script>
+  <script src="js/ble.js?v=2.0.1"></script>
+  <script src="js/app.js?v=2.0.1"></script>
+</body>
+</html>
