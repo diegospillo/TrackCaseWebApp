@@ -18,6 +18,10 @@
   let ownerResolve = null;
   let ownerWarned = false;
   let syncing = false;
+  let limitsFresh = false;
+  let limitsDirty = false;
+  let limitsPending = false;
+  let limitsTimer = null;
 
   // ============ UTILITY ============
   function toast(msg, ms) {
@@ -119,6 +123,11 @@
     $('budgetMinus').onclick = () => changeBudget(-1);
     $('budgetPlus').onclick = () => changeBudget(1);
     $('pollSelect').onchange = onPollChange;
+    $('saveLimits').onclick = saveLimits;
+    $('lockMax').oninput = $('lockHours').oninput = () => { limitsDirty = true; };
+    setInterval(() => {
+      if (ble.connected && activeDeviceId && !syncing) ble.requestStatus();
+    }, 10000);
     $('rowEditName').onclick = editName;
     $('rowEditModel').onclick = editModel;
     $('btnAddDevice').onclick = () => onSyncPressed(); // stesso flusso: collega un ESP32
@@ -132,6 +141,11 @@
     ble.onMessage = onBleMessage;
     ble.onConnectionChange = (connected) => {
       syncing = false;
+      limitsFresh = false;
+      limitsDirty = false;
+      limitsPending = false;
+      clearTimeout(limitsTimer);
+      if (user()) renderSettings();
       if (connected) ownerWarned = false;
       renderConnState();
       renderHome();
@@ -248,11 +262,13 @@
   // ============ RENDER: DIARIO ============
   function moveDiary(delta) {
     const d = new Date(diaryDate);
-    d.setDate(d.getDate() + delta);
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() + delta * 7);
     const today = new Date();
-    const endToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-    if (d > endToday) return; // niente futuro
-    diaryDate = d;
+    today.setHours(0, 0, 0, 0);
+    // Returning to the current week may land after today (e.g. Sunday -> Monday).
+    // Select today instead of rejecting the entire forward navigation.
+    diaryDate = d > today ? today : d;
     renderDiary();
   }
 
@@ -261,6 +277,10 @@
     const giorni = ['Domenica', 'Lunedì', 'Martedì', 'Mercoledì', 'Giovedì', 'Venerdì', 'Sabato'];
     const mesi = ['gen', 'feb', 'mar', 'apr', 'mag', 'giu', 'lug', 'ago', 'set', 'ott', 'nov', 'dic'];
     const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const currentMonday = new Date(now);
+    currentMonday.setDate(now.getDate() - (now.getDay() + 6) % 7);
+    $('diaryNext').disabled = diaryDate >= currentMonday;
     const isToday = diaryDate.toDateString() === now.toDateString();
     $('diaryDateLabel').textContent =
       (isToday ? 'Oggi' : giorni[diaryDate.getDay()]) + ' ' + diaryDate.getDate() + ' ' +
@@ -272,6 +292,7 @@
     const labels = ['L', 'M', 'M', 'G', 'V', 'S', 'D'];
     const dow = (diaryDate.getDay() + 6) % 7; // 0=Lun
     const monday = new Date(diaryDate);
+    monday.setHours(0, 0, 0, 0);
     monday.setDate(diaryDate.getDate() - dow);
     for (let i = 0; i < 7; i++) {
       const d = new Date(monday);
@@ -331,6 +352,7 @@
     const dev = activeDeviceId ? u.devices[activeDeviceId] : null;
     $('settingsIqosMac').textContent = dev && dev.iqosMac ? dev.iqosMac : 'Nessun IQOS associato';
     if (dev && dev.pollSec) $('pollSelect').value = String(dev.pollSec);
+    renderLockSettings(dev);
 
     // Lista dispositivi
     const wrap = $('deviceList');
@@ -352,6 +374,8 @@
       sel.innerHTML = Icons.get('check', 16);
       sel.title = 'Attiva';
       sel.onclick = () => {
+        if (activeDeviceId !== d.id && ble.connected) ble.disconnect();
+        limitsFresh = false; limitsDirty = false;
         activeDeviceId = d.id;
         Store.updateUser(u.id, { activeDeviceId: d.id });
         renderAll();
@@ -361,6 +385,8 @@
       del.innerHTML = Icons.get('trash', 16);
       del.onclick = () => {
         if (confirm('Rimuovere il dispositivo ' + d.name + ' e il suo storico locale?')) {
+          if (activeDeviceId === d.id && ble.connected) ble.disconnect();
+          limitsFresh = false; limitsDirty = false;
           Store.removeDevice(u.id, d.id);
           if (activeDeviceId === d.id) activeDeviceId = Object.keys(user().devices)[0] || null;
           renderAll();
@@ -514,6 +540,7 @@
         break;
       }
       case 'STATUS': {
+        limitsFresh = true;
         if (ownerResolve) ownerResolve(msg.kv.owner || '-');
         // Avviso passivo (una volta per connessione): questo ESP32 risulta
         // registrato a un profilo diverso da quello attivo nella WebApp.
@@ -524,6 +551,14 @@
         }
         if (!activeDeviceId) break;
         Store.updateDevice(user().id, activeDeviceId, {
+          lockSupported: msg.kv.max_terea_per_day !== undefined,
+          maxTerea: Number(msg.kv.max_terea_per_day) || 0,
+          lockHours: Number(msg.kv.lock_duration_hours) || 4,
+          lockPhase: Number(msg.kv.lock_phase) || 0,
+          lockUntil: Number(msg.kv.lock_until) || 0,
+          lockToday: Number(msg.kv.today) || 0,
+          lockReason: msg.kv.lock_reason || '',
+          clockValid: msg.kv.clock === '1',
           battery: parseInt(msg.kv.battery, 10) || 0,
           lifetime: parseInt(msg.kv.odometer, 10) || 0,
           stateDesc: msg.kv.stateDesc || '',
@@ -578,8 +613,17 @@
         toast('IQOS associato: ' + mac);
         break;
       }
-      case 'OK': break; // ack silenziosi
+      case 'OK':
+        if (msg.list[0] === 'SET_LIMITS') {
+          clearTimeout(limitsTimer); limitsPending = false; limitsDirty = false;
+          toast('Limiti salvati sul TrackCase');
+          ble.requestStatus();
+        }
+        break;
       case 'ERR': {
+        if (msg.list[0] === 'SET_LIMITS') {
+          clearTimeout(limitsTimer); limitsPending = false; renderSettings();
+        }
         toast('Errore ESP32: ' + line);
         break;
       }
@@ -587,7 +631,69 @@
   }
 
   // ============ BLE: AZIONI IMPOSTAZIONI ============
+  function lockPreventsReset() {
+    const dev = user() && user().devices[activeDeviceId];
+    if (dev && (dev.maxTerea || dev.lockPhase)) {
+      toast('Disattiva il limite e attendi lo sblocco prima di questa operazione.');
+      return true;
+    }
+    return false;
+  }
+
+  function renderLockSettings(dev) {
+    const ready = ble.connected && limitsFresh && dev && dev.lockSupported;
+    $('saveLimits').disabled = !ready || limitsPending;
+    $('lockMax').disabled = $('lockHours').disabled = !ready || limitsPending;
+    if (!limitsDirty && dev) {
+      $('lockMax').value = dev.maxTerea || 0;
+      $('lockHours').value = dev.lockHours || 4;
+    }
+    let status = 'Collega il TrackCase per leggere i limiti.';
+    if (ble.connected && !limitsFresh) status = 'Lettura dei limiti in corso…';
+    if (ble.connected && limitsFresh && dev && !dev.lockSupported)
+      status = 'Aggiorna il firmware del TrackCase per usare il blocco automatico.';
+    if (ready) {
+      const phases = ['Limite attivo', 'Blocco in attesa di invio: avvicina IQOS',
+        'Comando di blocco inviato (stato hardware non verificato)',
+        'Sblocco in attesa di invio: avvicina IQOS'];
+      status = (dev.lockPhase === 0 && !dev.maxTerea) ? 'Blocco automatico disattivato' : phases[dev.lockPhase];
+      if (dev.lockPhase === 0 && dev.lockReason === 'already_handled_today')
+        status = 'Blocco già gestito oggi. Salva nuovamente il limite per riattivarlo oggi (firmware 2.1.2 o successivo)';
+      if (dev.lockPhase === 0 && dev.lockReason === 'not_paired')
+        status = 'Nessuna IQOS associata al TrackCase';
+      status += '. TEREA rilevate oggi: ' + dev.lockToday + '.';
+      if (!dev.clockValid) status += ' Orologio non valido: sincronizza dalla Home.';
+      if (dev.lockUntil && dev.lockPhase !== 0) status += ' Scadenza: ' +
+        new Date(dev.lockUntil * 1000).toLocaleString('it-IT', { timeZone: 'Europe/Rome' }) + ' (Italia).';
+    }
+    $('lockStatus').textContent = status;
+  }
+
+  async function saveLimits() {
+    if (!ble.connected || !limitsFresh || limitsPending) return;
+    const maximum = Number($('lockMax').value), hours = Number($('lockHours').value);
+    if (!$('lockMax').value || !$('lockHours').value ||
+        !$('lockMax').checkValidity() || !$('lockHours').checkValidity()) {
+      toast('Soglia: 0–200 TEREA. Durata: 1–168 ore intere.'); return;
+    }
+    try {
+      limitsPending = true;
+      $('saveLimits').disabled = true;
+      // Success is reported only by OK|SET_LIMITS, never by a GATT write alone.
+      limitsTimer = setTimeout(() => {
+        limitsPending = false;
+        toast('Nessuna conferma ricevuta. Rileggi i limiti e riprova.');
+        ble.requestStatus();
+      }, 5000);
+      await ble.setLimits(maximum, hours);
+    } catch (error) {
+      clearTimeout(limitsTimer); limitsPending = false;
+      toast(error.message); renderSettings();
+    }
+  }
+
   async function pairIqos() {
+    if (lockPreventsReset()) return;
     if (!ble.connected) { toast('Collega prima il TrackCase dalla Home'); return; }
     toast('Caccia all\'IQOS in corso... tienilo vicino all\'ESP32', 6000);
     await ble.pairIqos();
@@ -599,6 +705,7 @@
   }
 
   async function unpairIqos() {
+    if (lockPreventsReset()) return;
     if (!ble.connected) { toast('Collega prima il TrackCase dalla Home'); return; }
     if (!confirm('Dissociare l\'IQOS dal TrackCase?')) return;
     await ble.resetIqos();
@@ -608,6 +715,7 @@
   }
 
   async function clearEspEvents() {
+    if (lockPreventsReset()) return;
     if (!ble.connected) { toast('Collega prima il TrackCase dalla Home'); return; }
     if (!confirm('Cancellare lo storico eventi sull\'ESP32? (Lo storico nella WebApp resta)')) return;
     await ble.resetEvents();

@@ -133,8 +133,8 @@
             <p id="diaryDateLabel" class="page-subtitle">Oggi</p>
           </div>
           <div class="diary-nav">
-            <button id="diaryPrev" class="icon-btn"><span class="ic" data-icon="chevron-left" data-size="20"></span></button>
-            <button id="diaryNext" class="icon-btn"><span class="ic" data-icon="chevron-right" data-size="20"></span></button>
+            <button id="diaryPrev" class="icon-btn" aria-label="Settimana precedente"><span class="ic" data-icon="chevron-left" data-size="20"></span></button>
+            <button id="diaryNext" class="icon-btn" aria-label="Settimana successiva"><span class="ic" data-icon="chevron-right" data-size="20"></span></button>
           </div>
         </header>
         <div id="weekStrip" class="week-strip"></div>
@@ -178,6 +178,22 @@
               <option value="1800">30 min</option>
             </select>
           </div>
+        </div>
+
+        <p class="section-label">BLOCCO AUTOMATICO ILUMA</p>
+        <div class="glass-card settings-card">
+          <div class="settings-row">
+            <label class="settings-title" for="lockMax">TEREA al giorno<br /><small class="settings-sub">0 = disattivato</small></label>
+            <input id="lockMax" class="field-input small" type="number" min="0" max="200" step="1" value="0" />
+          </div>
+          <div class="divider"></div>
+          <div class="settings-row">
+            <label class="settings-title" for="lockHours">Durata del blocco (ore)</label>
+            <input id="lockHours" class="field-input small" type="number" min="1" max="168" step="1" value="4" />
+          </div>
+          <div class="settings-row"><button id="saveLimits" class="btn-primary" type="button" disabled>Salva sul TrackCase</button></div>
+          <div class="settings-row"><p id="lockStatus" role="status" aria-live="polite">Collega il TrackCase per leggere i limiti.</p></div>
+          <div class="settings-row"><small class="settings-sub">Un blocco automatico al giorno, dalla mezzanotte italiana (ora legale inclusa). Salvare un limite maggiore di 0 riattiva la regola anche oggi, se non c’è un blocco o sblocco in corso. Lo sblocco richiede ESP32 acceso e IQOS raggiungibile. Imposta 0 per richiedere lo sblocco anticipato. Il limite aumenta il consumo della batteria del TrackCase.</small></div>
         </div>
 
         <p class="section-label">PROFILO</p>

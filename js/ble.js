@@ -117,6 +117,13 @@
     resetEvents() { return this.send('RESET_EVENTS'); }
     resetAll() { return this.send('RESET_ALL'); }
     setPoll(seconds) { return this.send('SET_POLL|' + seconds); }
+    setLimits(maximum, hours) {
+      if (!Number.isInteger(maximum) || maximum < 0 || maximum > 200 ||
+          !Number.isInteger(hours) || hours < 1 || hours > 168) {
+        throw new Error('Soglia: 0–200 TEREA. Durata: 1–168 ore intere.');
+      }
+      return this.send('SET_LIMITS|' + maximum + '|' + hours);
+    }
     pollNow() { return this.send('POLL_NOW'); }
   }
 

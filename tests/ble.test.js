@@ -127,3 +127,27 @@ test('reassembly: chunk lunghi (EVENTS paginati) ricomposti intatti', () => {
   assert.strictEqual(r.lines[0], line);
   assert.strictEqual(r.lines[0].split(',').length, 25);
 });
+
+test('setLimits: exact command, disabled mode, and invalid input rejection', async () => {
+  const ble = new TrackCaseBle();
+  const sent = [];
+  ble.send = async line => sent.push(line);
+  await ble.setLimits(10, 4);
+  await ble.setLimits(0, 168);
+  assert.deepStrictEqual(sent, ['SET_LIMITS|10|4', 'SET_LIMITS|0|168']);
+  for (const [n, h] of [[-1,4], [201,4], [10,0], [10,169], [1.5,4], [10,NaN], ['10',4]]) {
+    assert.throws(() => ble.setLimits(n, h));
+  }
+});
+
+test('lock STATUS: fragmented settings, intent and deadline survive reassembly', () => {
+  const { feed, lines } = makeReceiver();
+  const line = 'STATUS|max_terea_per_day=10|lock_duration_hours=4|lock_phase=3|lock_until=1788886800|today=10|timezone=Europe/Rome\n';
+  for (let i = 0; i < line.length; i += 17) {
+    feed(line.slice(i, i + 17));
+  }
+  const msg = BleProtocol.parseKv(lines[0]);
+  assert.strictEqual(msg.kv.lock_phase, '3');
+  assert.strictEqual(msg.kv.lock_until, '1788886800');
+  assert.strictEqual(msg.kv.timezone, 'Europe/Rome');
+});

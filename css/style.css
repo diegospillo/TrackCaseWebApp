@@ -275,3 +275,10 @@ canvas { width: 100%; display: block; }
   box-shadow: 0 8px 30px rgba(0,0,0,.5); max-width: 85%;
   text-align: center;
 }
+
+/* Daily device lock: fixed-size numeric inputs keep labels readable on mobile. */
+#lockMax, #lockHours { width: 5rem; flex: 0 0 5rem; }
+#lockStatus { margin: 0; font-size: 0.95rem; line-height: 1.5; overflow-wrap: anywhere; }
+#saveLimits:disabled { opacity: .5; cursor: not-allowed; }
+
+#diaryNext:disabled { opacity: .35; cursor: default; }
