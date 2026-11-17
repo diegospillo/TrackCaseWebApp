@@ -151,3 +151,137 @@ test('lock STATUS: fragmented settings, intent and deadline survive reassembly',
   assert.strictEqual(msg.kv.lock_until, '1788886800');
   assert.strictEqual(msg.kv.timezone, 'Europe/Rome');
 });
+
+
+// ---------- batteria TrackCase ----------
+
+test('TC_BATTERY: letture 82% e 59% preservano la stima del firmware', () => {
+  const first = BleProtocol.parseTrackCaseBattery('TC_BATTERY|voltage=4.04|percent=82', 1000);
+  assert.deepStrictEqual(first, { voltage: 4.04, percent: 82, available: true, updatedAt: 1000 });
+
+  const second = BleProtocol.parseTrackCaseBattery('TC_BATTERY|voltage=3.83|percent=59', 2000);
+  assert.deepStrictEqual(second, { voltage: 3.83, percent: 59, available: true, updatedAt: 2000 });
+});
+
+test('TC_BATTERY: lettura non disponibile e 0% valido sono distinti', () => {
+  const unavailable = BleProtocol.parseTrackCaseBattery('TC_BATTERY|voltage=0.00|percent=-1', 1000);
+  assert.deepStrictEqual(unavailable, { voltage: 0, percent: -1, available: false, updatedAt: 1000 });
+
+  const empty = BleProtocol.parseTrackCaseBattery('TC_BATTERY|voltage=3.20|percent=0', 2000);
+  assert.strictEqual(empty.available, true);
+  assert.strictEqual(empty.percent, 0);
+});
+
+test('TC_BATTERY: valori assenti o non numerici non sono disponibili', () => {
+  assert.strictEqual(BleProtocol.parseTrackCaseBattery('TC_BATTERY|voltage=4.04').available, false);
+  assert.strictEqual(BleProtocol.parseTrackCaseBattery('TC_BATTERY|percent=82').available, false);
+  assert.strictEqual(BleProtocol.parseTrackCaseBattery('TC_BATTERY|voltage=abc|percent=82').available, false);
+});
+
+test('STATUS: tc_battery e tc_voltage restano separati dalla batteria IQOS', () => {
+  const line = 'STATUS|battery=31|voltage=5.03|tc_battery=82|tc_voltage=4.04|odometer=5537';
+  const msg = BleProtocol.parseKv(line);
+  const reading = BleProtocol.parseTrackCaseBattery(msg, 1234);
+
+  assert.deepStrictEqual(reading, { voltage: 4.04, percent: 82, available: true, updatedAt: 1234 });
+  assert.strictEqual(msg.kv.battery, '31');
+  assert.strictEqual(msg.kv.voltage, '5.03');
+  assert.strictEqual(BleProtocol.parseTrackCaseBattery('STATUS|battery=31|voltage=5.03'), null);
+});
+
+test('STATUS: lettura TrackCase non disponibile non altera i campi IQOS', () => {
+  const msg = BleProtocol.parseKv('STATUS|battery=0|voltage=0|tc_battery=-1|tc_voltage=0.00');
+  const reading = BleProtocol.parseTrackCaseBattery(msg);
+  assert.strictEqual(reading.available, false);
+  assert.strictEqual(reading.percent, -1);
+  assert.strictEqual(msg.kv.battery, '0');
+  assert.strictEqual(msg.kv.voltage, '0');
+});
+
+test('TC_BATTERY: messaggio spezzato tra due notifiche', () => {
+  const r = makeReceiver();
+  r.feed('TC_BATTERY|voltage=4.04|per');
+  assert.deepStrictEqual(r.lines, []);
+  r.feed('cent=82\n');
+  assert.deepStrictEqual(r.lines, ['TC_BATTERY|voltage=4.04|percent=82']);
+  assert.strictEqual(BleProtocol.parseTrackCaseBattery(r.lines[0]).percent, 82);
+});
+
+test('TC_BATTERY: piu messaggi nella stessa notifica', () => {
+  const r = makeReceiver();
+  r.feed('TC_BATTERY|voltage=4.04|percent=82\nTC_BATTERY|voltage=3.83|percent=59\nTC_BATTERY|voltage=0.00|percent=-1\n');
+  assert.deepStrictEqual(r.lines.map(line => BleProtocol.parseTrackCaseBattery(line).percent), [82, 59, -1]);
+  assert.deepStrictEqual(r.lines.map(line => BleProtocol.parseTrackCaseBattery(line).available), [true, true, false]);
+});
+
+test('requestTrackCaseBattery: scrive esattamente TC_BATTERY con newline', async () => {
+  const ble = new TrackCaseBle();
+  const writes = [];
+  ble.connected = true;
+  ble.rxChar = {
+    writeValueWithResponse: async chunk => writes.push(new TextDecoder().decode(chunk))
+  };
+  await ble.requestTrackCaseBattery();
+  assert.deepStrictEqual(writes, ['TC_BATTERY\n']);
+});
+
+test('connessione e riconnessione: richiesta iniziale e listener non duplicati', async (t) => {
+  const writes = [];
+  const deviceListeners = new Set();
+  const txListeners = new Set();
+  const txChar = {
+    startNotifications: async () => {},
+    addEventListener: (type, fn) => { if (type === 'characteristicvaluechanged') txListeners.add(fn); },
+    removeEventListener: (type, fn) => { if (type === 'characteristicvaluechanged') txListeners.delete(fn); }
+  };
+  const rxChar = {
+    writeValueWithResponse: async chunk => writes.push(new TextDecoder().decode(chunk))
+  };
+  const service = {
+    getCharacteristic: async uuid => uuid === '19b10001-e8f2-537e-4f6c-d104768a1214' ? rxChar : txChar
+  };
+  const device = {
+    id: 'trackcase-test',
+    addEventListener: (type, fn) => { if (type === 'gattserverdisconnected') deviceListeners.add(fn); },
+    removeEventListener: (type, fn) => { if (type === 'gattserverdisconnected') deviceListeners.delete(fn); },
+    gatt: {
+      connected: false,
+      connect: async () => {
+        device.gatt.connected = true;
+        return { getPrimaryService: async () => service };
+      },
+      disconnect: () => {
+        device.gatt.connected = false;
+        deviceListeners.forEach(fn => fn());
+      }
+    }
+  };
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(global, 'navigator');
+  Object.defineProperty(global, 'navigator', {
+    configurable: true,
+    value: { bluetooth: { requestDevice: async () => device } }
+  });
+  t.after(() => {
+    if (navigatorDescriptor) Object.defineProperty(global, 'navigator', navigatorDescriptor);
+    else delete global.navigator;
+  });
+
+  const ble = new TrackCaseBle();
+  const states = [];
+  const lines = [];
+  ble.onConnectionChange = connected => states.push(connected);
+  ble.onMessage = line => lines.push(line);
+
+  await ble.connect();
+  await ble.disconnect();
+  await ble.connect();
+  assert.deepStrictEqual(writes, ['TC_BATTERY\n', 'TC_BATTERY\n']);
+  assert.deepStrictEqual(states, [true, false, true]);
+  assert.strictEqual(deviceListeners.size, 1);
+  assert.strictEqual(txListeners.size, 1);
+
+  const value = new TextEncoder().encode('TC_BATTERY|voltage=3.83|percent=59\n');
+  txListeners.forEach(fn => fn({ target: { value: { buffer: value.buffer } } }));
+  assert.deepStrictEqual(lines, ['TC_BATTERY|voltage=3.83|percent=59']);
+  await ble.disconnect();
+});

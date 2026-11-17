@@ -22,6 +22,11 @@
   let limitsDirty = false;
   let limitsPending = false;
   let limitsTimer = null;
+  let trackCaseBattery = emptyTrackCaseBattery();
+
+  function emptyTrackCaseBattery() {
+    return { voltage: null, percent: null, available: false, updatedAt: null };
+  }
 
   // ============ UTILITY ============
   function toast(msg, ms) {
@@ -91,6 +96,7 @@
 
   // ============ MAIN ============
   function showMain() {
+    trackCaseBattery = emptyTrackCaseBattery();
     $('loginView').classList.add('hidden');
     $('mainView').classList.remove('hidden');
     const u = user();
@@ -146,7 +152,10 @@
       limitsPending = false;
       clearTimeout(limitsTimer);
       if (user()) renderSettings();
-      if (connected) ownerWarned = false;
+      if (connected) {
+        ownerWarned = false;
+        trackCaseBattery = emptyTrackCaseBattery();
+      }
       renderConnState();
       renderHome();
       if (!connected) toast('TrackCase disconnesso');
@@ -202,6 +211,7 @@
       chip.className = 'device-chip' + (d.id === activeDeviceId ? ' active' : '');
       chip.textContent = d.name + ' (' + d.id.slice(-5) + ')';
       chip.onclick = () => {
+        if (activeDeviceId !== d.id) trackCaseBattery = emptyTrackCaseBattery();
         activeDeviceId = d.id;
         Store.updateUser(user().id, { activeDeviceId: d.id });
         renderAll();
@@ -226,12 +236,31 @@
     $('pillBattery').textContent = dev && dev.battery ? dev.battery + '%' : '--%';
     $('pillVoltage').textContent = dev && dev.voltage ? Number(dev.voltage).toFixed(2) + ' V' : '-- V';
     $('pillTime').textContent = dev && dev.lastSeen ? fmtTime(dev.lastSeen) : '--:--';
+    renderTrackCaseBattery();
 
     const btn = $('btnSync');
     btn.classList.toggle('syncing', syncing);
     if (syncing) btn.textContent = 'Sincronizzazione...';
     else if (ble.connected) btn.textContent = 'Sincronizza Dispositivo';
     else btn.textContent = devices_count() > 0 ? 'Collega TrackCase' : 'Registra il tuo TrackCase';
+  }
+
+  function renderTrackCaseBattery() {
+    const value = $('trackCaseBatteryValue');
+    const meta = $('trackCaseBatteryMeta');
+    if (!trackCaseBattery.available) {
+      value.textContent = '--';
+      meta.textContent = 'Batteria TrackCase non disponibile';
+      return;
+    }
+
+    const voltage = trackCaseBattery.voltage.toLocaleString('it-IT', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
+    value.textContent = trackCaseBattery.percent + '% · ' + voltage + ' V';
+    const updated = new Date(trackCaseBattery.updatedAt).toLocaleTimeString('it-IT');
+    meta.textContent = (ble.connected ? 'Aggiornato alle ' : 'Ultimo valore ricevuto alle ') + updated;
   }
 
   function devices_count() { return Store.getDevices(user().id).length; }
@@ -375,6 +404,7 @@
       sel.title = 'Attiva';
       sel.onclick = () => {
         if (activeDeviceId !== d.id && ble.connected) ble.disconnect();
+        if (activeDeviceId !== d.id) trackCaseBattery = emptyTrackCaseBattery();
         limitsFresh = false; limitsDirty = false;
         activeDeviceId = d.id;
         Store.updateUser(u.id, { activeDeviceId: d.id });
@@ -385,10 +415,14 @@
       del.innerHTML = Icons.get('trash', 16);
       del.onclick = () => {
         if (confirm('Rimuovere il dispositivo ' + d.name + ' e il suo storico locale?')) {
-          if (activeDeviceId === d.id && ble.connected) ble.disconnect();
+          const removingActive = activeDeviceId === d.id;
+          if (removingActive && ble.connected) ble.disconnect();
           limitsFresh = false; limitsDirty = false;
           Store.removeDevice(u.id, d.id);
-          if (activeDeviceId === d.id) activeDeviceId = Object.keys(user().devices)[0] || null;
+          if (removingActive) {
+            trackCaseBattery = emptyTrackCaseBattery();
+            activeDeviceId = Object.keys(user().devices)[0] || null;
+          }
           renderAll();
           toast('Dispositivo rimosso');
         }
@@ -533,6 +567,11 @@
   // ============ BLE: GESTIONE MESSAGGI ============
   function onBleMessage(line) {
     const msg = BleProtocol.parseKv(line);
+    const batteryReading = BleProtocol.parseTrackCaseBattery(msg);
+    if (batteryReading) {
+      trackCaseBattery = batteryReading;
+      renderTrackCaseBattery();
+    }
 
     switch (msg.type) {
       case 'HELLO': {

@@ -158,6 +158,12 @@ html, body {
   backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
   font-size: 13px; font-weight: 600; justify-content: center;
 }
+.trackcase-battery-card { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; padding: 14px 16px; }
+.trackcase-battery-icon { color: var(--electric); flex-shrink: 0; }
+.trackcase-battery-info { min-width: 0; }
+.trackcase-battery-title { color: rgba(255,255,255,.7); font-size: 12px; font-weight: 600; }
+.trackcase-battery-value { font-size: 20px; font-weight: 800; margin-top: 4px; }
+.trackcase-battery-meta { color: var(--text-dim); font-size: 11px; margin-top: 3px; }
 .sync-area { margin-top: 8px; }
 .sync-hint { text-align: center; color: var(--text-dim); font-size: 12px; margin-top: 10px; min-height: 16px; }
 

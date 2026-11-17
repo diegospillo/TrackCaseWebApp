@@ -22,6 +22,8 @@
       this.connected = false;
       this.rxBuffer = '';
       this.writeQueue = Promise.resolve();
+      this._onDisconnected = () => this._setConnected(false);
+      this._onNotification = (ev) => this._onChunk(ev.target.value);
 
       // Callback pubbliche
       this.onMessage = null;      // (line: string)
@@ -42,9 +44,8 @@
         optionalServices: [SERVICE_UUID]
       });
 
-      this.device.addEventListener('gattserverdisconnected', () => {
-        this._setConnected(false);
-      });
+      this.device.removeEventListener('gattserverdisconnected', this._onDisconnected);
+      this.device.addEventListener('gattserverdisconnected', this._onDisconnected);
 
       this.server = await this.device.gatt.connect();
       const service = await this.server.getPrimaryService(SERVICE_UUID);
@@ -52,11 +53,11 @@
       this.txChar = await service.getCharacteristic(CHAR_TX);
 
       await this.txChar.startNotifications();
-      this.txChar.addEventListener('characteristicvaluechanged', (ev) => {
-        this._onChunk(ev.target.value);
-      });
+      this.txChar.removeEventListener('characteristicvaluechanged', this._onNotification);
+      this.txChar.addEventListener('characteristicvaluechanged', this._onNotification);
 
       this._setConnected(true);
+      await this.requestTrackCaseBattery();
       return this.device;
     }
 
@@ -70,7 +71,9 @@
     }
 
     _setConnected(state) {
+      if (this.connected === state) return;
       this.connected = state;
+      if (!state) this.rxBuffer = '';
       if (this.onConnectionChange) this.onConnectionChange(state);
     }
 
@@ -111,6 +114,7 @@
     sendTime() { return this.send('TIME|' + Math.floor(Date.now() / 1000)); }
     sendRegister(uid, name) { return this.send('REGISTER|' + uid + '|' + name); }
     requestStatus() { return this.send('STATUS'); }
+    requestTrackCaseBattery() { return this.send('TC_BATTERY'); }
     requestSync(sinceTs) { return this.send('SYNC|' + (sinceTs || 0)); }
     pairIqos() { return this.send('PAIR_IQOS'); }
     resetIqos() { return this.send('RESET_IQOS'); }
@@ -139,6 +143,38 @@
     return out;
   }
 
+  function parseTrackCaseBattery(message, updatedAt) {
+    const msg = typeof message === 'string' ? parseKv(message) : message;
+    let voltageKey;
+    let percentKey;
+    if (msg.type === 'TC_BATTERY') {
+      voltageKey = 'voltage';
+      percentKey = 'percent';
+    } else if (msg.type === 'STATUS' &&
+        (Object.prototype.hasOwnProperty.call(msg.kv, 'tc_voltage') ||
+         Object.prototype.hasOwnProperty.call(msg.kv, 'tc_battery'))) {
+      voltageKey = 'tc_voltage';
+      percentKey = 'tc_battery';
+    } else {
+      return null;
+    }
+
+    const voltage = finiteNumber(msg.kv[voltageKey]);
+    const percent = finiteNumber(msg.kv[percentKey]);
+    return {
+      voltage,
+      percent,
+      available: voltage !== null && voltage > 0 && percent !== null && percent >= 0,
+      updatedAt: updatedAt === undefined ? Date.now() : updatedAt
+    };
+  }
+
+  function finiteNumber(value) {
+    if (value === undefined || value === null || String(value).trim() === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
   global.TrackCaseBle = TrackCaseBle;
-  global.BleProtocol = { parseKv, SERVICE_UUID };
+  global.BleProtocol = { parseKv, parseTrackCaseBattery, SERVICE_UUID };
 })(window);
